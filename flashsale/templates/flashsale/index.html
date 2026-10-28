@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Smartphone Flash Sale</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'flashsale/css/style.css' %}">
+    <script src="{% static 'flashsale/js/app.js' %}" defer></script>
+</head>
+<body>
+    <div class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="/" aria-label="Signal Supply home">
+                <span class="brand-mark" aria-hidden="true">S</span>
+                <span>SIGNAL<span class="brand-light"> / SUPPLY</span></span>
+            </a>
+            <span class="sale-label"><span class="live-dot" aria-hidden="true"></span> LIVE DROP</span>
+        </header>
+
+        <main>
+            <section class="sale-layout" aria-labelledby="page-title">
+                <div class="intro">
+                    <p class="eyebrow">LIMITED RELEASE <span aria-hidden="true">/</span> 001</p>
+                    <h1 id="page-title">The next<br>move is <span>yours.</span></h1>
+                    <p class="intro-copy">A little more power. A lot less noise.<br>Your next everyday essential is here.</p>
+                    <div class="drop-note">
+                        <span class="drop-index">01</span>
+                        <p>One release.<br><strong>Limited quantities.</strong></p>
+                    </div>
+                </div>
+
+                <article class="product-card" aria-labelledby="product-name">
+                    <div class="product-visual" aria-hidden="true">
+                        <span class="visual-orbit orbit-one"></span>
+                        <span class="visual-orbit orbit-two"></span>
+                        <span class="visual-cross cross-one">+</span>
+                        <span class="visual-cross cross-two">+</span>
+                        <div class="phone-frame">
+                            <div class="phone-screen">
+                                <span class="screen-glow"></span>
+                                <span class="screen-wordmark">SIGNAL</span>
+                                <span class="screen-number">01</span>
+                            </div>
+                            <span class="phone-camera"></span>
+                        </div>
+                        <span class="visual-caption">ENGINEERED FOR<br>EVERYDAY.</span>
+                    </div>
+
+                    <div class="product-info">
+                        <div class="product-heading">
+                            <div>
+                                <p class="eyebrow product-kicker">FLASH SALE EXCLUSIVE</p>
+                                <h2 id="product-name">Loading product…</h2>
+                            </div>
+                            <span class="product-edition">01 / 01</span>
+                        </div>
+                        <p id="product-description" class="product-description">Product details are loading.</p>
+
+                        <div class="purchase-details">
+                            <div class="price-block">
+                                <span class="detail-label">PRICE</span>
+                                <span id="product-price" class="price-value">—</span>
+                            </div>
+                            <div class="stock-block">
+                                <div class="stock-copy">
+                                    <span class="detail-label">LIVE INVENTORY</span>
+                                    <span id="product-stock" class="stock-value">Available: —</span>
+                                </div>
+                                <progress id="stock-progress" max="1" value="0" aria-label="Available sale inventory"></progress>
+                            </div>
+                        </div>
+
+                        <button id="checkout-button" class="buy-button" type="button" disabled>
+                            <span id="button-label">Loading sale…</span><span class="button-arrow" aria-hidden="true">↗</span>
+                        </button>
+
+                        <div class="status-panel" aria-label="Checkout updates">
+                            <span class="status-indicator" aria-hidden="true"></span>
+                            <div>
+                                <p id="checkout-status" role="status" aria-live="polite" aria-atomic="true">Connecting to the sale…</p>
+                                <p id="checkout-id" class="checkout-id" hidden></p>
+                            </div>
+                        </div>
+                        <p class="secure-note"><span aria-hidden="true">◇</span> Secure, first-come reservation</p>
+                    </div>
+                </article>
+            </section>
+        </main>
+
+        <footer class="site-footer">
+            <span>BUILT FOR THE EVERYDAY.</span>
+            <span>FLASH SALE <span aria-hidden="true">·</span> 2026</span>
+        </footer>
+    </div>
+</body>
+</html>

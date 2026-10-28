@@ -1,0 +1,133 @@
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HOST_PORT:-8080}:80"
+    environment:
+      NGINX_CHECKOUT_RATE: ${NGINX_CHECKOUT_RATE:-50r/s}
+      NGINX_CHECKOUT_BURST: ${NGINX_CHECKOUT_BURST:-200}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx/proxy-headers.conf:/etc/nginx/snippets/proxy-headers.conf:ro
+      - flashsale_static:/usr/share/nginx/html/static:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: &django-environment
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-this-secret-key}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB:-flashsale}
+      POSTGRES_USER: ${POSTGRES_USER:-flashsale}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flashsale_local_only}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: "0"
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-flashsale}:${RABBITMQ_PASSWORD:-flashsale_local_only}@rabbitmq:5672//
+      CHECKOUT_RATE_LIMIT_REQUESTS: ${CHECKOUT_RATE_LIMIT_REQUESTS:-100}
+      CHECKOUT_RATE_LIMIT_WINDOW: ${CHECKOUT_RATE_LIMIT_WINDOW:-60}
+      CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER: HTTP_X_REAL_IP
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-30}
+    command:
+      - sh
+      - -c
+      - python manage.py migrate --noinput && python manage.py collectstatic --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers "$${GUNICORN_WORKERS:-4}" --timeout "$${GUNICORN_TIMEOUT:-30}" --access-logfile - --error-logfile -
+    volumes:
+      - flashsale_static:/app/staticfiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=2)"]
+      interval: 10s
+      timeout: 4s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *django-environment
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
+    command:
+      - sh
+      - -c
+      - exec celery -A config worker --loglevel=INFO --concurrency "$${CELERY_WORKER_CONCURRENCY:-2}"
+    depends_on:
+      web:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-flashsale}
+      POSTGRES_USER: ${POSTGRES_USER:-flashsale}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flashsale_local_only}
+    volumes:
+      - flashsale_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - flashsale_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-flashsale}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-flashsale_local_only}
+    volumes:
+      - flashsale_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  flashsale_postgres_data:
+    name: goml_flash_sale_phase6_postgres_data
+  flashsale_redis_data:
+    name: goml_flash_sale_phase6_redis_data
+  flashsale_rabbitmq_data:
+    name: goml_flash_sale_phase6_rabbitmq_data
+  flashsale_static:
+    name: goml_flash_sale_phase6_static

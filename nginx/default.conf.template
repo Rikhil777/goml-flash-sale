@@ -1,0 +1,52 @@
+limit_req_zone $binary_remote_addr zone=checkout_limit:10m rate=${NGINX_CHECKOUT_RATE};
+
+upstream django_web {
+    server web:8000;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    client_max_body_size 1m;
+    client_body_timeout 10s;
+    send_timeout 30s;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 30s;
+
+    location /static/ {
+        alias /usr/share/nginx/html/static/;
+        expires 1h;
+        add_header Cache-Control "public";
+        access_log off;
+    }
+
+    location = /api/checkout/ {
+        limit_req zone=checkout_limit burst=${NGINX_CHECKOUT_BURST} nodelay;
+        limit_req_status 429;
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_pass http://django_web;
+    }
+
+    location /api/ {
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_pass http://django_web;
+    }
+
+    location = /health/ {
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_pass http://django_web;
+    }
+
+    location = /ready/ {
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_pass http://django_web;
+    }
+
+    location / {
+        include /etc/nginx/snippets/proxy-headers.conf;
+        proxy_pass http://django_web;
+    }
+}
