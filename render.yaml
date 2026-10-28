@@ -1,0 +1,135 @@
+services:
+  - type: web
+    name: goml-flash-sale-web
+    runtime: docker
+    region: singapore
+    plan: 1c-2g
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: sh -c 'python manage.py collectstatic --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 2 --timeout 30 --access-logfile - --error-logfile -'
+    healthCheckPath: /health/
+    preDeployCommand: python manage.py migrate --noinput
+    autoDeployTrigger: off
+    envVars:
+      - fromGroup: flashsale-app-secrets
+      - fromGroup: rabbitmq-credentials
+      - key: DJANGO_ENV
+        value: production
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: flashsale.rikhilkakani.online,.onrender.com
+      - key: DJANGO_CSRF_TRUSTED_ORIGINS
+        value: https://flashsale.rikhilkakani.online,https://*.onrender.com
+      - key: POSTGRES_CONN_MAX_AGE
+        value: "0"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: goml-flash-sale-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: goml-flash-sale-redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: goml-flash-sale-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: GUNICORN_WORKERS
+        value: "2"
+      - key: CHECKOUT_RATE_LIMIT_REQUESTS
+        value: "100"
+      - key: CHECKOUT_RATE_LIMIT_WINDOW
+        value: "60"
+      - key: CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER
+        value: ""
+
+  - type: worker
+    name: goml-flash-sale-worker
+    runtime: docker
+    region: singapore
+    plan: 1c-2g
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A config worker --loglevel=INFO --concurrency=2
+    autoDeployTrigger: off
+    envVars:
+      - fromGroup: flashsale-app-secrets
+      - fromGroup: rabbitmq-credentials
+      - key: DJANGO_ENV
+        value: production
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: flashsale.rikhilkakani.online,.onrender.com
+      - key: DATABASE_URL
+        fromDatabase:
+          name: goml-flash-sale-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: goml-flash-sale-redis
+          property: connectionString
+      - key: RABBITMQ_HOST
+        fromService:
+          type: pserv
+          name: goml-flash-sale-rabbitmq
+          property: host
+      - key: RABBITMQ_PORT
+        value: "5672"
+      - key: POSTGRES_CONN_MAX_AGE
+        value: "0"
+      - key: CELERY_WORKER_CONCURRENCY
+        value: "2"
+
+  - type: keyvalue
+    name: goml-flash-sale-redis
+    region: singapore
+    plan: 256mb
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+    ipAllowList: []
+
+  - type: pserv
+    name: goml-flash-sale-rabbitmq
+    runtime: image
+    image:
+      url: docker.io/library/rabbitmq:4.1-alpine
+    region: singapore
+    plan: 1c-2g
+    envVars:
+      - fromGroup: rabbitmq-credentials
+      - key: RABBITMQ_DEFAULT_VHOST
+        value: /
+    disk:
+      name: rabbitmq-data
+      mountPath: /var/lib/rabbitmq
+      sizeGB: 1
+
+databases:
+  - name: goml-flash-sale-db
+    plan: 0.5c-1g
+    region: singapore
+    postgresMajorVersion: "16"
+    databaseName: flashsale
+    user: flashsale
+
+envVarGroups:
+  - name: flashsale-app-secrets
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_SECURE_HSTS_SECONDS
+        value: "31536000"
+
+  - name: rabbitmq-credentials
+    envVars:
+      - key: RABBITMQ_DEFAULT_USER
+        value: flashsale_app
+      - key: RABBITMQ_DEFAULT_PASS
+        generateValue: true

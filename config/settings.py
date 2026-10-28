@@ -12,6 +12,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from urllib.parse import quote
+
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,15 +23,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-development-key-change-me')
+IS_PRODUCTION = os.environ.get('DJANGO_ENV', '').lower() == 'production' or os.environ.get('RENDER') == 'true'
+
+# Production deployments must provide a secret; local development keeps its safe fallback.
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if IS_PRODUCTION and not SECRET_KEY:
+    raise RuntimeError('DJANGO_SECRET_KEY must be set in production.')
+SECRET_KEY = SECRET_KEY or 'django-insecure-development-key-change-me'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() in {'1', 'true', 'yes', 'on'}
+DEBUG = False if IS_PRODUCTION else os.environ.get('DJANGO_DEBUG', 'true').lower() in {'1', 'true', 'yes', 'on'}
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    for host in os.environ.get(
+        'DJANGO_ALLOWED_HOSTS',
+        'localhost,127.0.0.1' if not IS_PRODUCTION else '',
+    ).split(',')
     if host.strip()
 ]
 
@@ -55,6 +66,8 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+if IS_PRODUCTION:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 ROOT_URLCONF = 'config.urls'
 
@@ -79,7 +92,15 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-if os.environ.get('POSTGRES_DB'):
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.environ.get('POSTGRES_CONN_MAX_AGE', '0')),
+        )
+    }
+elif os.environ.get('POSTGRES_DB'):
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -106,9 +127,22 @@ CHECKOUT_RATE_LIMIT_REQUESTS = int(os.environ.get('CHECKOUT_RATE_LIMIT_REQUESTS'
 CHECKOUT_RATE_LIMIT_WINDOW = int(os.environ.get('CHECKOUT_RATE_LIMIT_WINDOW', '60'))
 CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER = os.environ.get('CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER', '')
 
-CELERY_BROKER_URL = os.environ.get(
-    'CELERY_BROKER_URL', 'amqp://guest:guest@localhost:5672//'
-)
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL')
+if not CELERY_BROKER_URL and os.environ.get('RABBITMQ_HOST'):
+    rabbit_user = quote(
+        os.environ.get('RABBITMQ_USER', os.environ.get('RABBITMQ_DEFAULT_USER', 'flashsale')),
+        safe='',
+    )
+    rabbit_password = quote(
+        os.environ.get('RABBITMQ_PASSWORD', os.environ.get('RABBITMQ_DEFAULT_PASS', '')),
+        safe='',
+    )
+    rabbit_port = os.environ.get('RABBITMQ_PORT', '5672')
+    CELERY_BROKER_URL = (
+        f'amqp://{rabbit_user}:{rabbit_password}@'
+        f"{os.environ['RABBITMQ_HOST']}:{rabbit_port}//"
+    )
+CELERY_BROKER_URL = CELERY_BROKER_URL or 'amqp://guest:guest@localhost:5672//'
 CELERY_BROKER_CONNECTION_TIMEOUT = 3
 CELERY_TASK_PUBLISH_RETRY = False
 
@@ -149,6 +183,26 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+if IS_PRODUCTION:
+    STORAGES = {
+        'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+        'staticfiles': {
+            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        },
+    }
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
+# Render terminates TLS at its proxy and forwards the original scheme.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+if IS_PRODUCTION:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get('DJANGO_SECURE_HSTS_SECONDS', '31536000'))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
