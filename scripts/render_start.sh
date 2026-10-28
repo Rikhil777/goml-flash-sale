@@ -2,6 +2,11 @@
 set -eu
 
 python manage.py migrate --noinput
+python manage.py initialize_sale
+
+product_id=$(python manage.py shell --no-imports -c "from flashsale.models import Product; print(Product.objects.only('id').get(name='Flash Sale Smartphone').pk)")
+python manage.py sync_redis_inventory --product-id "$product_id"
+
 python manage.py collectstatic --noinput
 
 celery -A config worker \
