@@ -15,6 +15,7 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY --chown=app:app manage.py ./
 COPY --chown=app:app config ./config
 COPY --chown=app:app flashsale ./flashsale
+COPY --chown=app:app scripts/render_start.sh ./scripts/render_start.sh
 RUN mkdir -p /app/staticfiles \
     && chown app:app /app/staticfiles \
     && python manage.py check
@@ -22,4 +23,4 @@ RUN mkdir -p /app/staticfiles \
 USER app
 EXPOSE 8000
 
-CMD ["sh", "-c", "exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-4} --timeout ${GUNICORN_TIMEOUT:-30} --access-logfile - --error-logfile -"]
+CMD ["sh", "/app/scripts/render_start.sh"]
