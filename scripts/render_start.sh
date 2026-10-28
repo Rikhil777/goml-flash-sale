@@ -4,12 +4,8 @@ set -eu
 python manage.py migrate --noinput
 python manage.py initialize_sale
 
-if [ "${RESET_SALE_STOCK:-false}" = "true" ]; then
-    python manage.py reset_sale_stock
-else
-    product_id=$(python manage.py shell --no-imports -c "from flashsale.models import Product; print(Product.objects.only('id').get(name='Flash Sale Smartphone').pk)")
-    python manage.py sync_redis_inventory --product-id "$product_id"
-fi
+product_id=$(python manage.py shell --no-imports -c "from flashsale.models import Product; print(Product.objects.only('id').get(name='Flash Sale Smartphone').pk)")
+python manage.py sync_redis_inventory --product-id "$product_id"
 
 python manage.py collectstatic --noinput
 
