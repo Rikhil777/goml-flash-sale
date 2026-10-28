@@ -163,18 +163,20 @@ The gateway used for the load test is NGINX -> Gunicorn -> Django, not Django's 
 
 ## Render deployment
 
-The root `render.yaml` defines a Django web service, Render PostgreSQL, Render Key Value (Redis-compatible), a private RabbitMQ service with a persistent disk, and a Celery background worker. The browser frontend remains a Django template served by the web service. Redis remains the atomic inventory reservation service; Celery continues to publish through RabbitMQ.
+The root `render.yaml` defines a Free Django web service, Free Render PostgreSQL, and Free Render Key Value (Redis-compatible). To avoid paid-only private services and background workers, the Celery worker runs in the Django web container alongside Gunicorn with concurrency 1. Render Key Value serves both as the atomic inventory reservation store and the Celery broker. The browser frontend remains a Django template served by Django.
 
 ### Deploy the Blueprint
 
 1. Push this repository to the Git provider connected to Render. Do not add a `.env` file or real credentials to Git.
 2. In Render, create a Blueprint instance from this repository and select `render.yaml`.
-3. Review the resource region and plans in `render.yaml`. The services are set to Singapore; the PostgreSQL database, private RabbitMQ service, web service, worker, and Key Value must remain in the same region for private connectivity. The database plan and persistent RabbitMQ disk require paid Render resources.
-4. Sync the Blueprint. Render generates the Django secret key and RabbitMQ password in environment groups and links each application's services to PostgreSQL, Redis, and RabbitMQ over Render's private network.
-5. Wait for the web service and worker to become healthy. Render runs `python manage.py migrate --noinput` as the web service's pre-deploy command. The web container runs `python manage.py collectstatic --noinput` before starting Gunicorn; those files are served by WhiteNoise from that same container.
+3. Review the resource region and plans in `render.yaml`. The web service, database, and Key Value are set to Singapore and Free plans.
+4. Sync the Blueprint. Render generates the Django secret key; database and Key Value connection URLs are linked into the web service.
+5. The web container runs migrations and `collectstatic` at startup, then starts the Celery worker and Gunicorn. WhiteNoise serves the collected static files. Migrations run before Celery and Gunicorn start because Render's pre-deploy command is not available on Free web services.
 6. Add `flashsale.rikhilkakani.online` as a custom domain on the Django web service in Render. Render's dashboard will show the DNS target and verification status.
 
-`/health/` is configured as Render's web health check and checks that Django can serve a request. `/ready/` remains available to check PostgreSQL, Redis, and RabbitMQ together.
+`/health/` is configured as Render's web health check and checks that Django can serve a request. `/ready/` remains available to check PostgreSQL, Redis, and the configured Celery broker.
+
+Free services have limits that make this suitable for a demo rather than a durable flash sale: the web service spins down after 15 minutes without inbound traffic, Free Postgres expires after 30 days, and Free Key Value has 25 MB of volatile storage that can be cleared on restart. While the web service is asleep, its in-process Celery worker is asleep too. A Redis restart can also clear queued Celery jobs and inventory reservation keys; reconcile inventory from PostgreSQL after Redis data loss.
 
 ### Render environment variables
 
@@ -182,27 +184,23 @@ The Blueprint creates and connects the service variables below. Secret values ar
 
 | Variable | Services | Source / purpose |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | Web, worker | Render-generated secret from `flashsale-app-secrets`. Required in production. |
-| `DJANGO_ENV` | Web, worker | `production`; activates production-safe Django settings. |
-| `DJANGO_DEBUG` | Web, worker | `false`; production also forces debug off. |
-| `DJANGO_ALLOWED_HOSTS` | Web, worker | `flashsale.rikhilkakani.online,.onrender.com`; editable for the selected Render hostname. |
+| `DJANGO_SECRET_KEY` | Web | Render-generated secret from `flashsale-app-secrets`. Required in production. |
+| `DJANGO_ENV` | Web | `production`; activates production-safe Django settings. |
+| `DJANGO_DEBUG` | Web | `false`; production also forces debug off. |
+| `DJANGO_ALLOWED_HOSTS` | Web | `flashsale.rikhilkakani.online,.onrender.com`; editable for the selected Render hostname. |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Web | HTTPS origins for the custom domain and Render subdomains. |
-| `DJANGO_SECURE_HSTS_SECONDS` | Web, worker | `31536000`, supplied by the app secrets group. |
-| `DATABASE_URL` | Web, worker | Internal PostgreSQL connection string linked from Render Postgres. |
-| `POSTGRES_CONN_MAX_AGE` | Web, worker | `0`, preserving short-lived PostgreSQL connections. |
-| `REDIS_URL` | Web, worker | Private Redis-compatible Key Value connection string. Used for inventory reservations and request limiting. |
-| `RABBITMQ_HOST` | Web, worker | Private hostname linked from the RabbitMQ service. |
-| `RABBITMQ_PORT` | Web, worker | `5672`, RabbitMQ's AMQP port. |
-| `RABBITMQ_DEFAULT_USER` | RabbitMQ, web, worker | `flashsale_app`, shared from the credentials group. |
-| `RABBITMQ_DEFAULT_PASS` | RabbitMQ, web, worker | Render-generated secret from `rabbitmq-credentials`. |
-| `CELERY_BROKER_URL` | Web, worker | Optional override. If unset, Django constructs the AMQP URL from the RabbitMQ private host, port, and shared credentials. It never points Celery at Redis. |
-| `GUNICORN_WORKERS` | Web | `2`; adjust to the web service plan. |
+| `DJANGO_SECURE_HSTS_SECONDS` | Web | `31536000`, supplied by the app secrets group. |
+| `DATABASE_URL` | Web | Internal PostgreSQL connection string linked from Render Postgres. |
+| `POSTGRES_CONN_MAX_AGE` | Web | `0`, preserving short-lived PostgreSQL connections. |
+| `REDIS_URL` | Web | Render Key Value connection string used for inventory reservations and request limiting. |
+| `CELERY_BROKER_URL` | Web | The same Render Key Value connection string as `REDIS_URL`; Celery uses Redis as its broker on this Free deployment. |
+| `GUNICORN_WORKERS` | Web | `1` to conserve memory on the Free instance. |
 | `CHECKOUT_RATE_LIMIT_REQUESTS` | Web | `100`. |
 | `CHECKOUT_RATE_LIMIT_WINDOW` | Web | `60` seconds. |
 | `CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER` | Web | Empty because Django is directly exposed behind Render's managed proxy and does not trust a client-supplied IP header. |
-| `CELERY_WORKER_CONCURRENCY` | Worker | `2`; the Blueprint's worker command uses concurrency 2. |
+| `CELERY_WORKER_CONCURRENCY` | Web | `1`; the Blueprint's startup command runs one Celery worker process alongside Gunicorn. |
 
-`DATABASE_URL`, `REDIS_URL`, and `RABBITMQ_HOST` are linked values, so they should not be manually replaced with public connection addresses. If a secret is rotated, update the RabbitMQ service and its shared Render environment group together, then redeploy the web and worker.
+`DATABASE_URL`, `REDIS_URL`, and `CELERY_BROKER_URL` are linked values; do not replace them with public connection addresses.
 
 ### Custom subdomain DNS
 

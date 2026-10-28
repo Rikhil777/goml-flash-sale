@@ -3,16 +3,16 @@ services:
     name: goml-flash-sale-web
     runtime: docker
     region: singapore
-    plan: 1c-2g
+    plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: sh -c 'python manage.py collectstatic --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 2 --timeout 30 --access-logfile - --error-logfile -'
+    dockerCommand: sh -c 'python manage.py migrate --noinput && python manage.py collectstatic --noinput && (celery -A config worker --loglevel=INFO --concurrency=${CELERY_WORKER_CONCURRENCY:-1} &) && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers ${GUNICORN_WORKERS:-1} --timeout 30 --access-logfile - --error-logfile -'
     healthCheckPath: /health/
-    preDeployCommand: python manage.py migrate --noinput
     autoDeployTrigger: off
+    domains:
+      - flashsale.rikhilkakani.online
     envVars:
       - fromGroup: flashsale-app-secrets
-      - fromGroup: rabbitmq-credentials
       - key: DJANGO_ENV
         value: production
       - key: DJANGO_DEBUG
@@ -32,15 +32,15 @@ services:
           type: keyvalue
           name: goml-flash-sale-redis
           property: connectionString
-      - key: RABBITMQ_HOST
+      - key: CELERY_BROKER_URL
         fromService:
-          type: pserv
-          name: goml-flash-sale-rabbitmq
-          property: host
-      - key: RABBITMQ_PORT
-        value: "5672"
+          type: keyvalue
+          name: goml-flash-sale-redis
+          property: connectionString
       - key: GUNICORN_WORKERS
-        value: "2"
+        value: "1"
+      - key: CELERY_WORKER_CONCURRENCY
+        value: "1"
       - key: CHECKOUT_RATE_LIMIT_REQUESTS
         value: "100"
       - key: CHECKOUT_RATE_LIMIT_WINDOW
@@ -48,72 +48,16 @@ services:
       - key: CHECKOUT_RATE_LIMIT_CLIENT_IP_HEADER
         value: ""
 
-  - type: worker
-    name: goml-flash-sale-worker
-    runtime: docker
-    region: singapore
-    plan: 1c-2g
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: celery -A config worker --loglevel=INFO --concurrency=2
-    autoDeployTrigger: off
-    envVars:
-      - fromGroup: flashsale-app-secrets
-      - fromGroup: rabbitmq-credentials
-      - key: DJANGO_ENV
-        value: production
-      - key: DJANGO_DEBUG
-        value: "false"
-      - key: DJANGO_ALLOWED_HOSTS
-        value: flashsale.rikhilkakani.online,.onrender.com
-      - key: DATABASE_URL
-        fromDatabase:
-          name: goml-flash-sale-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: goml-flash-sale-redis
-          property: connectionString
-      - key: RABBITMQ_HOST
-        fromService:
-          type: pserv
-          name: goml-flash-sale-rabbitmq
-          property: host
-      - key: RABBITMQ_PORT
-        value: "5672"
-      - key: POSTGRES_CONN_MAX_AGE
-        value: "0"
-      - key: CELERY_WORKER_CONCURRENCY
-        value: "2"
-
   - type: keyvalue
     name: goml-flash-sale-redis
     region: singapore
-    plan: 256mb
+    plan: free
     maxmemoryPolicy: noeviction
-    persistenceMode: journal-snapshot
     ipAllowList: []
-
-  - type: pserv
-    name: goml-flash-sale-rabbitmq
-    runtime: image
-    image:
-      url: docker.io/library/rabbitmq:4.1-alpine
-    region: singapore
-    plan: 1c-2g
-    envVars:
-      - fromGroup: rabbitmq-credentials
-      - key: RABBITMQ_DEFAULT_VHOST
-        value: /
-    disk:
-      name: rabbitmq-data
-      mountPath: /var/lib/rabbitmq
-      sizeGB: 1
 
 databases:
   - name: goml-flash-sale-db
-    plan: 0.5c-1g
+    plan: free
     region: singapore
     postgresMajorVersion: "16"
     databaseName: flashsale
@@ -126,10 +70,3 @@ envVarGroups:
         generateValue: true
       - key: DJANGO_SECURE_HSTS_SECONDS
         value: "31536000"
-
-  - name: rabbitmq-credentials
-    envVars:
-      - key: RABBITMQ_DEFAULT_USER
-        value: flashsale_app
-      - key: RABBITMQ_DEFAULT_PASS
-        generateValue: true
